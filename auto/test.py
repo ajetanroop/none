@@ -19,15 +19,20 @@ BLUE = "\033[34m"
 YELLOW = "\033[33m"
 RESET = "\033[0m"
 
-
-def load_ssh_config():
-    ssh_config_file = os.path.expanduser("~/.ssh/config")
+def load_ssh_config(config_path=None):
+    if not hasattr(load_ssh_config, "_config_cache"):
+        load_ssh_config._config_cache = {}
+    if config_path is None:
+        config_path = os.path.expanduser("~/.ssh/config")
+    if config_path in load_ssh_config._config_cache:
+        return load_ssh_config._config_cache[config_path]
     config = paramiko.SSHConfig()
-    if os.path.exists(ssh_config_file):
-        with open(ssh_config_file, 'r') as f:
+    if os.path.exists(config_path):
+        with open(config_path, 'r') as f:
             config.parse(f)
     else:
-        raise FileNotFoundError("SSH config file not found at ~/.ssh/config")
+        raise FileNotFoundError(f"SSH config file not found at {config_path}")
+    load_ssh_config._config_cache[config_path] = config
     return config
 
 def is_localhost(hostname):
