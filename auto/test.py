@@ -172,23 +172,40 @@ def run_command_with_timeout_verbose(client, command, timeout, hostname="unknown
         return run_remote_command(client, command, timeout)
 
 
-def check_and_start_service(client, service, hostname, verbose=True):
-    success, output = run_command_with_timeout(client, f"systemctl is-active {service}", 5, hostname=hostname)
-    if success and "active" in output:
-        if verbose:
-            with print_lock:
-                print(f"{GREEN}[{hostname}] {service} is already running.{RESET}")
-        return
-    if verbose:
-        with print_lock:
-            print(f"{YELLOW}[{hostname}] {service} is not running. Attempting to start...{RESET}")
-    success, output = run_command_with_timeout(client, f"sudo systemctl start {service}", 10, hostname=hostname)
-    if success:
-        with print_lock:
-            print(f"{GREEN}[{hostname}] Started {service} successfully.{RESET}")
-    else:
-        with print_lock:
-            print(f"{RED}[{hostname}] Failed to start {service}: {output}{RESET}")
+def check_and_start_service(client, service_name, hostname="unknown", timeout=20, verbose=False, print_lock=None):
+    """
+    Checks if the given systemd service is active; if not, attempts to start it.
+    Uses run_command_with_timeout_verbose for all commands.
+    Returns: (success, message)
+    """
+    check_cmd = f"systemctl is-active {service_name}"
+    start_cmd = f"sudo systemctl start {service_name}"
+
+    # Check service status
+    success, output = run_command_with_timeout_verbose(
+        client, check_cmd, timeout, hostname, verbose, print_lock
+    )
+    if success and output.strip() == "active":
+        return True, f"Service '{service_name}' is already running."
+    elif not success:
+        return False, f"Failed to check status of '{service_name}': {output}"
+
+    # Try to start service
+    start_success, start_output = run_command_with_timeout_verbose(
+        client, start_cmd, timeout, hostname, verbose, print_lock
+    )
+    if not start_success:
+        return False, f"Failed to start '{service_name}': {start_output}"
+
+    # Re-check status after attempt to start
+    recheck_success, recheck_output = run_command_with_timeout_verbose(
+        client, check_cmd, timeout, hostname, verbose, print_lock
+    )
+    if recheck_success and recheck_output.strip() == "active":
+        return True, f"Service '{service_name}' started successfully."
+    return False, f"Service '{service_name}' failed to start. Status: {recheck_output}"
+
+
 
 def signal_handler(sig, frame):
     print("\nCtrl-C received. Exiting now!")
