@@ -61,6 +61,12 @@ def is_localhost(hostname):
     return hostname.strip().lower() in is_localhost._local_hostnames
 
 def connect_to_host(hostname):
+    """
+    Establish SSH connection using cached SSH config.
+    Returns:
+        - None if running locally.
+        - paramiko.SSHClient (caller must call .close()) if remote.
+    """
     if is_localhost(hostname):
         return None  # Signal that we're running locally
 
@@ -69,36 +75,42 @@ def connect_to_host(hostname):
     if not host_config:
         raise ValueError(f"No configuration found for {hostname}")
 
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    def get_ssh_client(host, host_config):
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        connect_kwargs = {
+            "hostname": host_config.get("hostname", host),
+            "username": host_config.get("user"),
+            "port": int(host_config.get("port", 22)),
+        }
+        return client, connect_kwargs
 
-    connect_kwargs = {
-        "hostname": host_config.get("hostname", hostname),
-        "username": host_config.get("user"),
-        "port": int(host_config.get("port", 22)),
-    }
-
+    # Handle ProxyJump if present
     if "proxyjump" in host_config:
         proxy_host = host_config["proxyjump"]
         proxy_config = config.lookup(proxy_host)
         if not proxy_config:
             raise ValueError(f"No configuration found for proxy jump host: {proxy_host}")
 
-        proxy_client = paramiko.SSHClient()
-        proxy_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        proxy_client.connect(
-            hostname=proxy_config.get("hostname", proxy_host),
-            username=proxy_config.get("user"),
-            port=int(proxy_config.get("port", 22)),
-        )
+        proxy_client, proxy_kwargs = get_ssh_client(proxy_host, proxy_config)
+        proxy_client.connect(**proxy_kwargs)
         proxy_transport = proxy_client.get_transport()
-        dest_addr = (connect_kwargs["hostname"], connect_kwargs["port"])
+        dest_addr = (host_config.get("hostname", hostname), int(host_config.get("port", 22)))
         local_addr = ("127.0.0.1", 0)
         proxy_channel = proxy_transport.open_channel("direct-tcpip", dest_addr, local_addr)
-        connect_kwargs["sock"] = proxy_channel
 
-    client.connect(**connect_kwargs)
-    return client
+        client, connect_kwargs = get_ssh_client(hostname, host_config)
+        connect_kwargs["sock"] = proxy_channel
+        client.connect(**connect_kwargs)
+        # Note: proxy_client will remain open until client is closed
+        # The caller must close both if using proxy
+        client._proxy_client = proxy_client  # Attach for caller to close if needed
+        return client
+    else:
+        client, connect_kwargs = get_ssh_client(hostname, host_config)
+        client.connect(**connect_kwargs)
+        return client
+
 
 def run_command_with_timeout(client, command, timeout, hostname="unknown"):
     try:
