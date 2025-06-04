@@ -111,38 +111,66 @@ def connect_to_host(hostname):
         client.connect(**connect_kwargs)
         return client
 
+def run_command_with_timeout_verbose(client, command, timeout, hostname="unknown", verbose=False, print_lock=None):
+    """
+    Runs a command locally or via SSH with a timeout.
+    If verbose is True, prints output/errors with [hostname] prefix (thread-safe if print_lock is provided).
+    Returns: (success: bool, output: str)
+    """
+    def print_msg(msg):
+        if verbose:
+            if print_lock:
+                with print_lock:
+                    print(f"[{hostname}] {msg}")
+            else:
+                print(f"[{hostname}] {msg}")
 
-def run_command_with_timeout(client, command, timeout, hostname="unknown"):
-    try:
-        if client is None:
-            # Run locally
+    def run_local_command(command, timeout):
+        try:
             proc = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             try:
                 out, err = proc.communicate(timeout=timeout)
-                return True, out.decode().strip() if out else err.decode().strip()
+                output = out.decode().strip() if out else err.decode().strip()
+                print_msg(output)
+                return True, output
             except subprocess.TimeoutExpired:
                 proc.kill()
-                with print_lock:
-                    print(f"{RED}[{hostname}] Timeout exceeded while running: {command}{RESET}")
-                return False, f"Timeout exceeded while running: {command}"
-        else:
-            # Run via SSH
+                out, err = proc.communicate()
+                msg = f"Timeout exceeded while running: {command}"
+                print_msg(msg)
+                return False, msg
+        except Exception as e:
+            msg = f"Exception: {e}"
+            print_msg(msg)
+            return False, msg
+
+    def run_remote_command(client, command, timeout):
+        try:
             stdin, stdout, stderr = client.exec_command(command)
             start = time.time()
             while not stdout.channel.exit_status_ready():
                 if time.time() - start > timeout:
                     stdout.channel.close()
-                    with print_lock:
-                        print(f"{RED}[{hostname}] Timeout exceeded while running: {command}{RESET}")
-                    return False, f"Timeout exceeded while running: {command}"
-                time.sleep(0.5)
+                    msg = f"Timeout exceeded while running: {command}"
+                    print_msg(msg)
+                    return False, msg
+                time.sleep(0.2)
             out = stdout.read().decode().strip()
             err = stderr.read().decode().strip()
-            return True, out if out else err
-    except Exception as e:
-        with print_lock:
-            print(f"{RED}[{hostname}] Exception during command: {command}\n{e}{RESET}")
-        return False, str(e)
+            output = out if out else err
+            print_msg(output)
+            return True, output
+        except Exception as e:
+            msg = f"Exception: {e}"
+            print_msg(msg)
+            return False, msg
+
+    # Main logic
+    if client is None:
+        return run_local_command(command, timeout)
+    else:
+        return run_remote_command(client, command, timeout)
+
 
 def check_and_start_service(client, service, hostname, verbose=True):
     success, output = run_command_with_timeout(client, f"systemctl is-active {service}", 5, hostname=hostname)
