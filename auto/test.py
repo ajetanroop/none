@@ -205,46 +205,6 @@ def check_and_start_service(client, service_name, hostname="unknown", timeout=20
         return True, f"Service '{service_name}' started successfully."
     return False, f"Service '{service_name}' failed to start. Status: {recheck_output}"
 
-def copy_file(client, src, dest, hostname="unknown", timeout=30, verbose=False, print_lock=None):
-    """
-    Copies a file to or on a host.
-    - If client is None, performs a local file copy.
-    - If client is SSH, uses 'scp' to copy from local to remote host.
-    Returns: (success: bool, message: str)
-    """
-    if client is None:
-        # Local copy
-        cmd = f"cp {shlex.quote(src)} {shlex.quote(dest)}"
-        return run_command_with_timeout_verbose(
-            None, cmd, timeout, hostname, verbose, print_lock
-        )
-    else:
-        # Remote copy (from local to remote)
-        try:
-            import scp
-        except ImportError:
-            return False, "scp module not installed. Please install with 'pip install scp'."
-        try:
-            with client.open_sftp() as sftp:
-                sftp.put(src, dest)
-            if verbose:
-                msg = f"Copied {src} to {hostname}:{dest}"
-                if print_lock:
-                    with print_lock:
-                        print(f"[{hostname}] {msg}")
-                else:
-                    print(f"[{hostname}] {msg}")
-            return True, f"Copied {src} to {hostname}:{dest}"
-        except Exception as e:
-            msg = f"Failed to copy {src} to {hostname}:{dest}: {e}"
-            if verbose:
-                if print_lock:
-                    with print_lock:
-                        print(f"[{hostname}] {msg}")
-                else:
-                    print(f"[{hostname}] {msg}")
-            return False, msg
-
 
 def signal_handler(sig, frame):
     print("\nCtrl-C received. Exiting now!")
