@@ -19,6 +19,13 @@ BLUE = "\033[34m"
 YELLOW = "\033[33m"
 RESET = "\033[0m"
 
+def get_local_hostname():
+    try:
+        output = subprocess.check_output(['hostname'], encoding='utf-8')
+        return output.strip()
+    except Exception:
+        return None
+
 def load_ssh_config(config_path=None):
     if not hasattr(load_ssh_config, "_config_cache"):
         load_ssh_config._config_cache = {}
@@ -36,9 +43,9 @@ def load_ssh_config(config_path=None):
     return config
 
 def is_localhost(hostname):
-    """Check if the given hostname refers to the local machine."""
-    try:
-        local_hostnames = {
+    if not hasattr(is_localhost, "_local_hostnames"):
+        # Cache the local hostname values
+        hostnames = {
             "localhost",
             "127.0.0.1",
             "::1",
@@ -46,9 +53,12 @@ def is_localhost(hostname):
             socket.getfqdn(),
             socket.gethostbyname(socket.gethostname()),
         }
-        return hostname in local_hostnames
-    except Exception:
-        return False
+        # Add the value from `hostname` command
+        local_cmd_hostname = get_local_hostname()
+        if local_cmd_hostname:
+            hostnames.add(local_cmd_hostname)
+        is_localhost._local_hostnames = set(h.lower() for h in hostnames)
+    return hostname.strip().lower() in is_localhost._local_hostnames
 
 def connect_to_host(hostname):
     if is_localhost(hostname):
